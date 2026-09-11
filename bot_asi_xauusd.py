@@ -20,10 +20,13 @@ TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "YOUR_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "YOUR_CHAT_ID")
 
 SYMBOL = "frxXAUUSD"
-DERIV_WS_URL = "wss://ws.derivws.com/websockets/v3?app_id=1089"
-DATA_WINDOW = 500       # Memory Window untuk Multi-Scale Analysis
-ANTI_SPAM_COOLDOWN = 180 # 3 menit cooldown antar sinyal
-MIN_TP_POINTS = 5.0     # Minimum 50 Poin ($5.00 XAUUSD)
+# GANTI angka 1089 di bawah ini dengan APP_ID milikmu dari https://api.deriv.com/apps
+DERIV_APP_ID = os.environ.get("DERIV_APP_ID", "1089") 
+DERIV_WS_URL = f"wss://ws.derivws.com/websockets/v3?app_id={DERIV_APP_ID}"
+
+DATA_WINDOW = 500       
+ANTI_SPAM_COOLDOWN = 180 
+MIN_TP_POINTS = 5.0     
 
 logging.basicConfig(
     level=logging.INFO,
@@ -227,7 +230,7 @@ class ASIXauusdBot:
                 prices = data["history"]["prices"]
                 for p in prices:
                     self.engine.push_tick(p)
-                logging.info(f"Warm-up selesai. {len(prices)} history ticks berhasil dimuat ke memori.")
+                logging.info(f"Warm-up selesai. {len(prices)} history ticks dimuat.")
 
             if "tick" in data and "quote" in data["tick"]:
                 price = data["tick"]["quote"]
@@ -251,15 +254,10 @@ class ASIXauusdBot:
 
     def on_open(self, ws):
         logging.info("Terhubung ke Real-Time Data Stream Deriv (frxXAUUSD).")
-        # Satu payload gabungan resmi Deriv API
-        payload = {
-            "ticks_history": SYMBOL,
-            "end": "latest",
-            "count": 300,
-            "style": "ticks",
-            "subscribe": 1
-        }
-        ws.send(json.dumps(payload))
+        # Request subscribe terpisah setelah koneksi stabil
+        ws.send(json.dumps({"ticks_history": SYMBOL, "end": "latest", "count": 300, "style": "ticks"}))
+        time.sleep(0.5)
+        ws.send(json.dumps({"ticks": SYMBOL, "subscribe": 1}))
 
     def run(self):
         while True:
@@ -272,12 +270,19 @@ class ASIXauusdBot:
                     on_close=self.on_close
                 )
                 
-                ws_thread = threading.Thread(target=lambda: self.ws.run_forever(ping_interval=15, ping_timeout=8))
+                ws_thread = threading.Thread(target=lambda: self.ws.run_forever(ping_interval=10, ping_timeout=5))
                 ws_thread.daemon = True
                 ws_thread.start()
 
                 while ws_thread.is_alive():
                     time.sleep(10)
+                    # Kirim manual Ping untuk menjaga alur WebSocket Deriv tetap hidup
+                    try:
+                        if self.ws and self.ws.sock and self.ws.sock.connected:
+                            self.ws.send(json.dumps({"ping": 1}))
+                    except Exception:
+                        pass
+
                     if time.time() - self.last_tick_time > 30 and self.is_market_open():
                         logging.warning("Watchdog Alert: Data tick membeku >30 detik! Restocking socket...")
                         self.ws.close()
