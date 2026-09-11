@@ -21,13 +21,13 @@ TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "YOUR_CHAT_ID")
 
 SYMBOL = "frxXAUUSD"
 DERIV_WS_URL = "wss://ws.derivws.com/websockets/v3?app_id=1089"
-DATA_WINDOW = 500       # Expanded for Multi-Scale Analysis
-ANTI_SPAM_COOLDOWN = 180 # 3 menit cooldown
-MIN_TP_POINTS = 5.0     # Minimum 50 Points ($5.00 XAUUSD)
+DATA_WINDOW = 500       # Memory Window untuk Multi-Scale Analysis
+ANTI_SPAM_COOLDOWN = 180 # 3 menit cooldown antar sinyal
+MIN_TP_POINTS = 5.0     # Minimum 50 Poin ($5.00 XAUUSD)
 
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] ASI Perfected Core: %(message)s",
+    format="%(asctime)s [%(levelname)s] ASI Core: %(message)s",
     handlers=[logging.StreamHandler(sys.stdout)]
 )
 
@@ -99,7 +99,7 @@ class AntiBlockTelegramDispatcher(threading.Thread):
 class QuantumTopoBehavioralEngine:
     def __init__(self, window_size=DATA_WINDOW):
         self.prices = deque(maxlen=window_size)
-        self.adaptive_threshold_modifier = 0.0 # Dynamic Self-Learning Weight
+        self.adaptive_threshold_modifier = 0.0
         
     def push_tick(self, price):
         self.prices.append(float(price))
@@ -121,7 +121,6 @@ class QuantumTopoBehavioralEngine:
         """Multi-Scale Hilbert Wavelet Alignment"""
         analytic_signal = hilbert(data - np.mean(data))
         phase = np.unwrap(np.angle(analytic_signal))
-        # Mengukur arah vektor fase makro (Short vs Long Term Wave Alignment)
         short_phase_diff = phase[-1] - phase[-20]
         long_phase_diff = phase[-1] - phase[-100]
         return float(short_phase_diff + long_phase_diff)
@@ -152,12 +151,11 @@ class QuantumTopoBehavioralEngine:
 
         prices_arr = np.array(self.prices)
         
-        # 1. Volatility Noise & Outlier Guard
+        # Filter lompatan liar / berita
         recent_diff = np.abs(np.diff(prices_arr[-5:]))
-        if np.max(recent_diff) > 3.5: # Filter lompatan harga liar
+        if np.max(recent_diff) > 3.5:
             return None
 
-        # 2. Multi-Domain Mathematics Calculation
         topo_entropy = self._compute_topological_entropy(prices_arr)
         sys_entropy, fractal_dim = self._compute_thermodynamic_state(prices_arr)
         macro_vector = self._compute_macro_trend_vector(prices_arr)
@@ -165,25 +163,20 @@ class QuantumTopoBehavioralEngine:
         curr_price = prices_arr[-1]
         std_price = np.std(prices_arr[-40:])
         
-        # 3. Dynamic Stop Loss Calculation (Safe from Spread Noise)
+        # Dynamic Stop Loss
         local_atr = np.mean(np.abs(np.diff(prices_arr[-15:])))
-        dynamic_sl_dist = float(np.clip(local_atr * 2.5, 0.40, 1.20)) # Safety floor $0.40 - $1.20
+        dynamic_sl_dist = float(np.clip(local_atr * 2.5, 0.40, 1.20))
 
-        # Momentum Alignment
         micro_momentum = (curr_price - prices_arr[-15]) / (std_price + 1e-5)
         
         signal = "HOLD"
         confidence = 0.0
-        
-        # Strict Multi-Scale Alignment Threshold
         strict_entropy_threshold = 0.25 - self.adaptive_threshold_modifier
         
         if topo_entropy < strict_entropy_threshold and sys_entropy < 1.05:
-            # BUY Alignment: Micro momentum Positif DAN Macro Wave Vector Positif
             if micro_momentum > 1.95 and macro_vector > 1.5 and fractal_dim < 1.40:
                 signal = "BUY"
                 confidence = float(min(99.9, (micro_momentum / 2.0) * 80 + (1.40 - fractal_dim) * 20))
-            # SELL Alignment: Micro momentum Negatif DAN Macro Wave Vector Negatif
             elif micro_momentum < -1.95 and macro_vector < -1.5 and fractal_dim < 1.40:
                 signal = "SELL"
                 confidence = float(min(99.9, (abs(micro_momentum) / 2.0) * 80 + (1.40 - fractal_dim) * 20))
@@ -191,7 +184,6 @@ class QuantumTopoBehavioralEngine:
         if signal == "HOLD":
             return None
 
-        # Take Profit Target Calculation (Minimum 50 Poin / $5.00)
         calculated_tp_dist = max(MIN_TP_POINTS, dynamic_sl_dist * 6.0 * (confidence / 50.0))
         rr_ratio = calculated_tp_dist / dynamic_sl_dist
 
@@ -234,14 +226,14 @@ class ASIXauusdBot:
             data = json.loads(message)
             self.last_tick_time = time.time()
             
-            if "history" in data:
+            # Data History / Ticks
+            if "history" in data and "prices" in data["history"]:
                 prices = data["history"]["prices"]
                 for p in prices:
                     self.engine.push_tick(p)
-                logging.info(f"Warm-up selesai. {len(prices)} history ticks berhasil dimuat.")
-                return
+                logging.info(f"Warm-up selesai. {len(prices)} history ticks berhasil dimuat ke memori.")
 
-            if "tick" in data:
+            if "tick" in data and "quote" in data["tick"]:
                 price = data["tick"]["quote"]
                 self.engine.push_tick(price)
                 
@@ -263,8 +255,15 @@ class ASIXauusdBot:
 
     def on_open(self, ws):
         logging.info("Terhubung ke Real-Time Data Stream Deriv (frxXAUUSD).")
-        ws.send(json.dumps({"ticks_history": SYMBOL, "end": "latest", "count": 300, "style": "ticks"}))
-        ws.send(json.dumps({"ticks": SYMBOL, "subscribe": 1}))
+        # Kombinasi tunggal resmi Deriv API (History Warmup + Subscribe Realtime)
+        payload = {
+            "ticks_history": SYMBOL,
+            "end": "latest",
+            "count": 300,
+            "style": "ticks",
+            "subscribe": 1
+        }
+        ws.send(json.dumps(payload))
 
     def run(self):
         while True:
