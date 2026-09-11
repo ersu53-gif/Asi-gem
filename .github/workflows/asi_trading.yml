@@ -2,7 +2,7 @@ name: ASI XAUUSD Continuous Engine
 
 on:
   schedule:
-    - cron: '0 */3 * * 1-5' # Dijalankan setiap 3 jam
+    - cron: '0 */3 * * 1-5' # Dijalankan setiap 3 jam (Senin - Jumat)
   workflow_dispatch:
 
 jobs:
@@ -23,7 +23,7 @@ jobs:
           pip install -r requirements.txt
 
       - name: Run ASI Engine
-        timeout-minutes: 170 # Berjalan maksimal 2 jam 50 menit, lalu selesai secara bersih
+        timeout-minutes: 170 # Berjalan 2 jam 50 menit
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
