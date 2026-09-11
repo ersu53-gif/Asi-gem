@@ -14,13 +14,12 @@ from scipy.stats import entropy
 import requests
 
 # =====================================================================
-# CONFIGURATION & ADVANCED HYPERPARAMETERS
+# CONFIGURATION & HYPERPARAMETERS
 # =====================================================================
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "YOUR_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "YOUR_CHAT_ID")
 
 SYMBOL = "frxXAUUSD"
-# GANTI angka 1089 di bawah ini dengan APP_ID milikmu dari https://api.deriv.com/apps
 DERIV_APP_ID = os.environ.get("DERIV_APP_ID", "1089") 
 DERIV_WS_URL = f"wss://ws.derivws.com/websockets/v3?app_id={DERIV_APP_ID}"
 
@@ -35,7 +34,7 @@ logging.basicConfig(
 )
 
 # =====================================================================
-# ANTI-BLOCK TELEGRAM QUEUE ENGINE
+# TELEGRAM DISPATCHER ENGINE
 # =====================================================================
 class AntiBlockTelegramDispatcher(threading.Thread):
     def __init__(self, token, chat_id):
@@ -97,7 +96,7 @@ class AntiBlockTelegramDispatcher(threading.Thread):
             time.sleep(2.0)
 
 # =====================================================================
-# MAXIMAL PRECISION ASI CORE ENGINE
+# QUANTUM CORE ENGINE
 # =====================================================================
 class QuantumTopoBehavioralEngine:
     def __init__(self, window_size=DATA_WINDOW):
@@ -202,7 +201,7 @@ class QuantumTopoBehavioralEngine:
         }
 
 # =====================================================================
-# AUTONOMOUS RUNNER & WATCHDOG
+# BOT MAIN RUNNER WITH STABLE WATCHDOG
 # =====================================================================
 class ASIXauusdBot:
     def __init__(self):
@@ -211,6 +210,7 @@ class ASIXauusdBot:
         self.dispatcher.start()
         self.ws = None
         self.last_tick_time = time.time()
+        self.is_running = False
 
     def is_market_open(self):
         now = datetime.now(timezone.utc)
@@ -224,13 +224,15 @@ class ASIXauusdBot:
     def on_message(self, ws, message):
         try:
             data = json.loads(message)
+            
+            # Reset timer setiap kali mendapat respon apapun dari server
             self.last_tick_time = time.time()
             
             if "history" in data and "prices" in data["history"]:
                 prices = data["history"]["prices"]
                 for p in prices:
                     self.engine.push_tick(p)
-                logging.info(f"Warm-up selesai. {len(prices)} history ticks dimuat.")
+                logging.info(f"Warm-up selesai. {len(prices)} history ticks berhasil dimuat ke memori.")
 
             if "tick" in data and "quote" in data["tick"]:
                 price = data["tick"]["quote"]
@@ -243,6 +245,7 @@ class ASIXauusdBot:
                 if result and result["signal"] in ["BUY", "SELL"]:
                     logging.info(f"SIAP EKSEKUSI: {result['signal']} @ {result['price']}")
                     self.dispatcher.enqueue_signal(result)
+
         except Exception as e:
             logging.error(f"Error Message Process: {e}")
 
@@ -254,14 +257,44 @@ class ASIXauusdBot:
 
     def on_open(self, ws):
         logging.info("Terhubung ke Real-Time Data Stream Deriv (frxXAUUSD).")
-        # Request subscribe terpisah setelah koneksi stabil
-        ws.send(json.dumps({"ticks_history": SYMBOL, "end": "latest", "count": 300, "style": "ticks"}))
-        time.sleep(0.5)
-        ws.send(json.dumps({"ticks": SYMBOL, "subscribe": 1}))
+        self.last_tick_time = time.time()
+        
+        # Minta history sekaligus subscribe real-time secara tunggal
+        payload = {
+            "ticks_history": SYMBOL,
+            "end": "latest",
+            "count": 300,
+            "style": "ticks",
+            "subscribe": 1
+        }
+        ws.send(json.dumps(payload))
+
+    def _start_ping_and_watchdog(self):
+        """ Thread terpisah untuk menjaga heartbeat dan memantau kekakuan data. """
+        while self.is_running:
+            time.sleep(15)
+            if not self.ws or not self.ws.sock or not self.ws.sock.connected:
+                continue
+
+            # Send ping
+            try:
+                self.ws.send(json.dumps({"ping": 1}))
+            except Exception:
+                pass
+
+            # Watchdog Check (Toleransi dinaikkan ke 60 detik)
+            idle_time = time.time() - self.last_tick_time
+            if idle_time > 60 and self.is_market_open():
+                logging.warning(f"Watchdog Alert: Data tick membeku >60 detik! (Idle: {idle_time:.1f}s). Reconnecting...")
+                self.ws.close()
+                break
 
     def run(self):
         while True:
             try:
+                self.last_tick_time = time.time()
+                self.is_running = True
+                
                 self.ws = websocket.WebSocketApp(
                     DERIV_WS_URL,
                     on_open=self.on_open,
@@ -270,25 +303,18 @@ class ASIXauusdBot:
                     on_close=self.on_close
                 )
                 
-                ws_thread = threading.Thread(target=lambda: self.ws.run_forever(ping_interval=10, ping_timeout=5))
-                ws_thread.daemon = True
-                ws_thread.start()
+                # Jalankan ping dan watchdog thread
+                watchdog_thread = threading.Thread(target=self._start_ping_and_watchdog, daemon=True)
+                watchdog_thread.start()
 
-                while ws_thread.is_alive():
-                    time.sleep(10)
-                    # Kirim manual Ping untuk menjaga alur WebSocket Deriv tetap hidup
-                    try:
-                        if self.ws and self.ws.sock and self.ws.sock.connected:
-                            self.ws.send(json.dumps({"ping": 1}))
-                    except Exception:
-                        pass
-
-                    if time.time() - self.last_tick_time > 30 and self.is_market_open():
-                        logging.warning("Watchdog Alert: Data tick membeku >30 detik! Restocking socket...")
-                        self.ws.close()
-                        break
+                # Blocking run_forever
+                self.ws.run_forever(ping_interval=20, ping_timeout=10)
+                
+                self.is_running = False
+                time.sleep(3) # Cooldown sebelum mengulang koneksi
 
             except Exception as e:
+                self.is_running = False
                 logging.error(f"System Failure: {e}. Auto-restart dalam 5 detik...")
                 time.sleep(5)
 
