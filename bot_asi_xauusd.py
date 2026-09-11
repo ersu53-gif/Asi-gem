@@ -118,7 +118,6 @@ class QuantumTopoBehavioralEngine:
         return float(-cm * np.log(cm + 1e-12))
 
     def _compute_macro_trend_vector(self, data):
-        """Multi-Scale Hilbert Wavelet Alignment"""
         analytic_signal = hilbert(data - np.mean(data))
         phase = np.unwrap(np.angle(analytic_signal))
         short_phase_diff = phase[-1] - phase[-20]
@@ -151,7 +150,6 @@ class QuantumTopoBehavioralEngine:
 
         prices_arr = np.array(self.prices)
         
-        # Filter lompatan liar / berita
         recent_diff = np.abs(np.diff(prices_arr[-5:]))
         if np.max(recent_diff) > 3.5:
             return None
@@ -163,7 +161,6 @@ class QuantumTopoBehavioralEngine:
         curr_price = prices_arr[-1]
         std_price = np.std(prices_arr[-40:])
         
-        # Dynamic Stop Loss
         local_atr = np.mean(np.abs(np.diff(prices_arr[-15:])))
         dynamic_sl_dist = float(np.clip(local_atr * 2.5, 0.40, 1.20))
 
@@ -226,7 +223,6 @@ class ASIXauusdBot:
             data = json.loads(message)
             self.last_tick_time = time.time()
             
-            # Data History / Ticks
             if "history" in data and "prices" in data["history"]:
                 prices = data["history"]["prices"]
                 for p in prices:
@@ -255,7 +251,7 @@ class ASIXauusdBot:
 
     def on_open(self, ws):
         logging.info("Terhubung ke Real-Time Data Stream Deriv (frxXAUUSD).")
-        # Kombinasi tunggal resmi Deriv API (History Warmup + Subscribe Realtime)
+        # Satu payload gabungan resmi Deriv API
         payload = {
             "ticks_history": SYMBOL,
             "end": "latest",
